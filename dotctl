@@ -6,11 +6,16 @@ DOTCTL_DOTFILES_DESTDIR=${DOTCTL_DOTFILES_DESTDIR:=$HOME}
 DOTCTL_EXCLUDES=${DOTCTL_EXCLUDES:=".gitignore .gitmodules"}
 DOTCTL_SYMLINK_DIRS=${DOTCTL_SYMLINK_DIRS:=""}
 DOTCTL_VERBOSE=${DOTCTL_VERBOSE:="0"}
+DOTCTL_NO_HOOK=${DOTCTL_NO_HOOK:="0"}
 
 _usage() {
-	echo "Usage:"
-	echo "    status - display the status of the dotfiles"
-	echo "    up [tag1] [tag2] ....- install the dotfiles, tags can optionally be specified"
+	echo "Usage: $(basename "$0") [OPTIONS] CMD"
+	echo "  OPTIONS:"
+	echo "      -v - enable verbose mode"
+	echo "      -n - disable hooks"
+	echo "  CMD:"
+	echo "      status - display the status of the dotfiles"
+	echo "      up [tag1] [tag2] ....- install the dotfiles, tags can optionally be specified"
 }
 
 _log() {
@@ -30,9 +35,7 @@ _untracked_files() {
 }
 
 _exclude_pattern() {
-	[ -z "$DOTCTL_EXCLUDES" ] && echo ""
 	pattern=$(echo "$DOTCTL_EXCLUDES" | sed 's/ /$|/g')
-	[ -z "$list" ] || pattern="$list^"
 
 	for dir in $DOTCTL_SYMLINK_DIRS; do
 		# dirname/.....
@@ -141,9 +144,11 @@ _up() {
 		_install_files "$(_tracked_files |  grep -E "^tag-$tag\/" | grep -vE "$excludes" )" "tag-$tag"
 	done
 
-	_log "Running post-up hook"
 	hook_file="$DOTCTL_DOTFILES_DIR/hooks/post-up"
-	[ -x "$hook_file" ] && "$hook_file"
+	if [ "$DOTCTL_NO_HOOK" = "0" ]; then
+		_log "Running post-up hook"
+		[ -x "$hook_file" ] && "$hook_file"
+	fi
 }
 
 _status() {
@@ -158,11 +163,32 @@ _status() {
 	done
 }
 
-case "$1" in
-	status) _status ;;
-	up)
-		shift
-		_up "$@"
-		;;
-	*) _usage;;
-esac
+while true; do
+	case "$1" in
+		-n)
+			_log "Hooks disabled"
+			DOTCTL_NO_HOOK=1
+			shift
+			continue
+			;;
+		-v)
+			DOTCTL_VERBOSE=1
+			_log "Verbose mode enabled"
+			shift
+			continue
+			;;
+		status)
+			_status
+			break
+			;;
+		up)
+			shift
+			_up "$@"
+			break
+			;;
+		*)
+			_usage
+			break
+			;;
+	esac
+done
