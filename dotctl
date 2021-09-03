@@ -1,0 +1,168 @@
+#!/bin/sh
+set -e
+
+DOTCTL_DOTFILES_DIR=${DOTCTL_DOTFILES_DIR:="$HOME/.dotfiles"}
+DOTCTL_DOTFILES_DESTDIR=${DOTCTL_DOTFILES_DESTDIR:=$HOME}
+DOTCTL_EXCLUDES=${DOTCTL_EXCLUDES:=".gitignore .gitmodules"}
+DOTCTL_SYMLINK_DIRS=${DOTCTL_SYMLINK_DIRS:=""}
+DOTCTL_VERBOSE=${DOTCTL_VERBOSE:="0"}
+
+_usage() {
+	echo "Usage:"
+	echo "    status - display the status of the dotfiles"
+	echo "    up [tag1] [tag2] ....- install the dotfiles, tags can optionally be specified"
+}
+
+_log() {
+	[ "$DOTCTL_VERBOSE" = "1" ] && echo "$1"
+}
+
+_git() {
+	git -C "$DOTCTL_DOTFILES_DIR" "$@"
+}
+
+_tracked_files() {
+	_git ls-files
+}
+
+_untracked_files() {
+	_git ls-files --others --exclude-standard --no-empty-directory
+}
+
+_exclude_pattern() {
+	[ -z "$DOTCTL_EXCLUDES" ] && echo ""
+	pattern=$(echo "$DOTCTL_EXCLUDES" | sed 's/ /$|/g')
+	[ -z "$list" ] || pattern="$list^"
+
+	for dir in $DOTCTL_SYMLINK_DIRS; do
+		# dirname/.....
+		# .../dirname/.....
+		regexp="^$dir\/|\/$dir\/"
+		if [ -z "$pattern" ]; then
+			pattern=$regexp
+		else
+			pattern="$pattern|$regexp"
+		fi
+	done
+
+	echo "$pattern"
+}
+
+_symlink_dirs() {
+	files=$1
+	prefix=$2
+
+	include=
+	for dir in $DOTCTL_SYMLINK_DIRS; do
+		if [ -z "$prefix" ]; then
+			regexp="^($dir)\/"
+		else
+			regexp="^$prefix\/$dir\/"
+		fi
+
+		if [ -z "$include" ]; then
+			include=$regexp
+		else
+			include="$include|$regexp"
+		fi
+	done
+
+	echo "$files" | grep -Eo "$include" | uniq | sed 's/\/$//'
+}
+
+_install_symlink_dirs() {
+	directories=$1
+	prefix=$2
+
+	for dir in $directories; do
+		src="$DOTCTL_DOTFILES_DIR/$dir"
+		[ -d "$src" ] || continue
+
+		dst=$(echo "$dir" | sed "s/$prefix\///")
+		dst="$DOTCTL_DOTFILES_DESTDIR/.$dst"
+
+		if [ ! -L "$dst" ]; then
+			_log "Installing symlink directory from $src to $dst"
+			ln -s "$src" "$dst"
+		fi
+	done
+}
+
+_install_files() {
+	files=$1
+	prefix=$2
+	for file in $files; do
+		_install_file "$file" "$prefix"
+	done
+}
+
+_install_file() {
+	file=$1
+	prefix=$2
+
+	dest=$file
+	[ -n "$prefix" ] && dest=$(echo "$file" | cut -d '/' -f 2-)
+
+	dir=$(dirname "$dest")
+
+	if [ "$dir" != "." ]; then
+		dir="$DOTCTL_DOTFILES_DESTDIR/.$dir"
+		if [ ! -d "$dir" ]; then
+			_log "Creating directory $dir"
+			mkdir -p "$dir"
+		fi
+	fi
+
+	dest="$DOTCTL_DOTFILES_DESTDIR/.$dest"
+	if [ ! -L "$dest" ]; then
+		_log "Installing $file to $dest"
+		ln -s "$DOTCTL_DOTFILES_DIR/$file" "$dest"
+	fi
+}
+
+_up() {
+	tags="$*"
+
+	excludes=$(_exclude_pattern)
+
+	exclude_tags="^tag-"
+	[ -z "$excludes" ] || exclude_tags="$exclude_tags|$excludes"
+
+	_log "Installing symlink directories"
+	_install_symlink_dirs "$(_symlink_dirs "$(_tracked_files)")"
+
+	_log "Installing tracked files"
+	_install_files "$(_tracked_files | grep -v -E "$exclude_tags")"
+
+	for tag in $tags; do
+		_log "Installing symlink directories with tag $tag"
+		_install_symlink_dirs "$(_symlink_dirs "$(_tracked_files)" "tag-$tag")" "tag-$tag"
+		_log "Installing tracked files with tag $tag"
+		_install_files "$(_tracked_files |  grep -E "^tag-$tag\/" | grep -vE "$excludes" )" "tag-$tag"
+	done
+
+	_log "Running post-up hook"
+	hook_file="$DOTCTL_DOTFILES_DIR/hooks/post-up"
+	[ -x "$hook_file" ] && "$hook_file"
+}
+
+_status() {
+	echo "Source:          $DOTCTL_DOTFILES_DIR"
+	echo "Destination:     $DOTCTL_DOTFILES_DESTDIR"
+	echo "Tracked files:   $(_tracked_files | wc -l)"
+	echo "Untracked files: $(_untracked_files | wc -l)"
+	echo "Tags: "
+	for file in "$DOTCTL_DOTFILES_DIR"/tag-*; do
+		tag=${file##*-}
+		echo "  - $tag"
+	done
+}
+
+case "$1" in
+	status) _status ;;
+	up)
+		shift
+		_up "$@"
+		;;
+	*) _usage;;
+esac
