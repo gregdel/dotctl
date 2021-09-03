@@ -48,8 +48,7 @@ _exclude_pattern() {
 }
 
 _symlink_dirs() {
-	files=$1
-	prefix=$2
+	prefix=$1
 
 	include=
 	for dir in $DOTCTL_SYMLINK_DIRS; do
@@ -66,14 +65,12 @@ _symlink_dirs() {
 		fi
 	done
 
-	echo "$files" | grep -Eo "$include" | uniq | sed 's/\/$//'
+	grep -Eo "$include" | uniq | sed 's/\/$//'
 }
 
 _install_symlink_dirs() {
-	directories=$1
-	prefix=$2
-
-	for dir in $directories; do
+	prefix=$1
+	while read -r dir; do
 		src="$DOTCTL_DOTFILES_DIR/$dir"
 		[ -d "$src" ] || continue
 
@@ -88,9 +85,8 @@ _install_symlink_dirs() {
 }
 
 _install_files() {
-	files=$1
-	prefix=$2
-	for file in $files; do
+	prefix=$1
+	while read -r file; do
 		_install_file "$file" "$prefix"
 	done
 }
@@ -128,16 +124,16 @@ _up() {
 	[ -z "$excludes" ] || exclude_tags="$exclude_tags|$excludes"
 
 	_log "Installing symlink directories"
-	_install_symlink_dirs "$(_symlink_dirs "$(_tracked_files)")"
+	_tracked_files | _symlink_dirs | _install_symlink_dirs
 
 	_log "Installing tracked files"
-	_install_files "$(_tracked_files | grep -v -E "$exclude_tags")"
+	_tracked_files | grep -v -E "$exclude_tags" | _install_files
 
 	for tag in $tags; do
 		_log "Installing symlink directories with tag $tag"
-		_install_symlink_dirs "$(_symlink_dirs "$(_tracked_files)" "tag-$tag")" "tag-$tag"
+		_tracked_files | _symlink_dirs "tag-$tag" | _install_symlink_dirs "tag-$tag"
 		_log "Installing tracked files with tag $tag"
-		_install_files "$(_tracked_files |  grep -E "^tag-$tag\/" | grep -vE "$excludes" )" "tag-$tag"
+		_tracked_files |  grep -E "^tag-$tag\/" | grep -vE "$excludes" | _install_files "tag-$tag"
 	done
 
 	hook_file="$DOTCTL_DOTFILES_DIR/hooks/post-up"
