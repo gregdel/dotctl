@@ -30,10 +30,6 @@ _tracked_files() {
 	_git ls-files
 }
 
-_untracked_files() {
-	_git ls-files --others --exclude-standard --no-empty-directory
-}
-
 _exclude_pattern() {
 	pattern=$(echo "$DOTCTL_EXCLUDES" | sed 's/ /$|/g')
 
@@ -151,11 +147,31 @@ _up() {
 	fi
 }
 
+_git_changes() {
+	status=$(_git status --porcelain \
+		| awk '{!x[$1]++}END{for (i in x) print i ":" x[i]}')
+
+	[ -z "$status" ] && return
+
+	echo "Git changes:"
+	for line in $status; do
+		sign=${line%%:*}
+		count=${line##*:}
+
+		case "$sign" in
+			??) sign="Untracked" ;;
+			M) sign="Modified" ;;
+		esac
+
+		echo "  $sign: $count"
+	done
+}
+
 _status() {
 	echo "Source:          $DOTCTL_DOTFILES_DIR"
 	echo "Destination:     $DOTCTL_DOTFILES_DESTDIR"
 	echo "Tracked files:   $(_tracked_files | wc -l)"
-	echo "Untracked files: $(_untracked_files | wc -l)"
+	_git_changes
 	echo "Tags: "
 	for file in "$DOTCTL_DOTFILES_DIR"/tag-*; do
 		tag=${file##*-}

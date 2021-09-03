@@ -15,12 +15,13 @@ This tools creates symlinks from your **git managed** dotfiles into your home di
 ### Requirements
 
 Only basic unix tools are required:
+* awk
 * git
-* wc
 * grep
-* uniq
-* sed
 * ln
+* sed
+* uniq
+* wc
 
 ### Configuration
 
