@@ -30,23 +30,6 @@ _tracked_files() {
 	_git ls-files
 }
 
-_exclude_pattern() {
-	pattern=$(echo "$DOTCTL_EXCLUDES" | sed 's/ /$|/g')
-
-	for dir in $DOTCTL_SYMLINK_DIRS; do
-		# dirname/.....
-		# .../dirname/.....
-		regexp="^$dir\/|\/$dir\/"
-		if [ -z "$pattern" ]; then
-			pattern=$regexp
-		else
-			pattern="$pattern|$regexp"
-		fi
-	done
-
-	echo "$pattern"
-}
-
 _symlink_dirs() {
 	prefix=$1
 
@@ -115,25 +98,47 @@ _install_file() {
 	fi
 }
 
+_exclude_files() {
+	pattern=$(echo "$DOTCTL_EXCLUDES" | sed 's/ /$|/g')
+
+	for dir in $DOTCTL_SYMLINK_DIRS; do
+		# dirname/.....
+		# .../dirname/.....
+		regexp="^$dir\/|\/$dir\/"
+		if [ -z "$pattern" ]; then
+			pattern=$regexp
+		else
+			pattern="$pattern|$regexp"
+		fi
+	done
+
+	grep -v -E "$pattern"
+}
+
+_exclude_tags() {
+	grep -v -E "^tag-"
+}
+
+_only_tag() {
+	tag=$1
+	grep -E "^$tag\/"
+}
+
 _up() {
 	tags="$*"
-
-	excludes=$(_exclude_pattern)
-
-	exclude_tags="^tag-"
-	[ -z "$excludes" ] || exclude_tags="$exclude_tags|$excludes"
 
 	_log "Installing symlink directories"
 	_tracked_files | _symlink_dirs | _install_symlink_dirs
 
 	_log "Installing tracked files"
-	_tracked_files | grep -v -E "$exclude_tags" | _install_files
+	_tracked_files | _exclude_tags | _exclude_files | _install_files
 
 	for tag in $tags; do
+		tag_dir="tag-$tag"
 		_log "Installing symlink directories with tag $tag"
-		_tracked_files | _symlink_dirs "tag-$tag" | _install_symlink_dirs "tag-$tag"
+		_tracked_files | _symlink_dirs "$tag_dir" | _install_symlink_dirs "$tag_dir"
 		_log "Installing tracked files with tag $tag"
-		_tracked_files |  grep -E "^tag-$tag\/" | grep -vE "$excludes" | _install_files "tag-$tag"
+		_tracked_files | _only_tag "$tag_dir" | _exclude_files | _install_files "$tag_dir"
 	done
 
 	hook_file="$DOTCTL_DOTFILES_DIR/hooks/post-up"
