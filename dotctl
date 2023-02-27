@@ -23,12 +23,17 @@ _log() {
 	[ "$DOTCTL_VERBOSE" = "1" ] && echo "$1"
 }
 
+_err() {
+	_log "err: $*" 1>&2
+	exit 1
+}
+
 _git() {
 	git -C "$DOTCTL_DOTFILES_DIR" "$@"
 }
 
 _tracked_files() {
-	_git ls-files
+	_git ls-files "$@"
 }
 
 _symlink_dirs() {
@@ -83,6 +88,14 @@ _uninstall_symlink_dirs() {
 _install_files() {
 	prefix=$1
 	while read -r file; do
+		case "$file" in
+			tag-*)
+				_log "With tags !! ${file#*/}"
+				;;
+			*)
+				_log "Without tags !! $file"
+				;;
+		esac
 		_install_file "$file" "$prefix"
 	done
 }
@@ -91,8 +104,11 @@ _install_file() {
 	file=$1
 	prefix=$2
 
+	_log "file: $file"
+
 	dest=$file
 	[ -n "$prefix" ] && dest=$(echo "$file" | cut -d '/' -f 2-)
+
 
 	dir=$(dirname "$dest")
 	if [ "$dir" != "." ]; then
@@ -141,10 +157,11 @@ _uninstall_file() {
 _exclude_files() {
 	pattern=$(echo "$DOTCTL_EXCLUDES" | sed 's/ /$|/g')
 
+	set -x
 	for dir in $DOTCTL_SYMLINK_DIRS; do
 		# dirname/.....
 		# .../dirname/.....
-		regexp="^$dir\/|\/$dir\/"
+		regexp="$dir/|/$dir/"
 		if [ -z "$pattern" ]; then
 			pattern=$regexp
 		else
@@ -153,6 +170,7 @@ _exclude_files() {
 	done
 
 	grep -v -E "$pattern"
+	set +x
 }
 
 _exclude_tags() {
@@ -244,19 +262,32 @@ _status() {
 	done
 }
 
-while true; do
+_install() {
+	file=$1
+	[ -n "$file" ] || _err "Missing filename"
+
+	file=$(readlink -f "$file")
+	echo "Installing file $file in $DOTCTL_DOTFILES_DESTDIR"
+
+	if [ -f "$file" ]; then
+		_tracked_files --error-unmatch "$file" | _exclude_files | _install_files
+	else
+		set -x
+		_tracked_files --error-unmatch "$file" | _symlink_dirs
+		set +x
+		# _tracked_files --error-unmatch "$file" | _symlink_dirs | _install_symlink_dirs
+	fi
+}
+
+while [ "$1" ]; do
 	case "$1" in
 		-n)
 			_log "Hooks disabled"
 			DOTCTL_NO_HOOK=1
-			shift
-			continue
 			;;
 		-v)
 			DOTCTL_VERBOSE=1
 			_log "Verbose mode enabled"
-			shift
-			continue
 			;;
 		status)
 			_status
@@ -270,6 +301,11 @@ while true; do
 		down)
 			shift
 			_down "$@"
+			break
+			;;
+		install)
+			shift
+			_install "$@"
 			break
 			;;
 		*)
