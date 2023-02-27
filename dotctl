@@ -14,8 +14,9 @@ _usage() {
 	echo "      -v - enable verbose mode"
 	echo "      -n - disable hooks"
 	echo "  CMD:"
-	echo "      status - display the status of the dotfiles"
-	echo "      up [tag1] [tag2] ....- install the dotfiles, tags can optionally be specified"
+	echo "      status                   - display the status of the dotfiles"
+	echo "      up [tag1] [tag2] ....    - install the dotfiles, tags can optionally be specified"
+	echo "      down [tag1] [tag2] ....  - install the dotfiles, tags can optionally be specified"
 }
 
 _log() {
@@ -67,6 +68,18 @@ _install_symlink_dirs() {
 	done
 }
 
+_uninstall_symlink_dirs() {
+	prefix=$1
+	while read -r dir; do
+		dst=$(echo "$dir" | sed "s/$prefix\///")
+		dst="$DOTCTL_DOTFILES_DESTDIR/.$dst"
+		[ -L "$dst" ] || continue
+
+		_log "Uninstalling $dst"
+		rm "$dst"
+	done
+}
+
 _install_files() {
 	prefix=$1
 	while read -r file; do
@@ -82,7 +95,6 @@ _install_file() {
 	[ -n "$prefix" ] && dest=$(echo "$file" | cut -d '/' -f 2-)
 
 	dir=$(dirname "$dest")
-
 	if [ "$dir" != "." ]; then
 		dir="$DOTCTL_DOTFILES_DESTDIR/.$dir"
 		if [ ! -d "$dir" ]; then
@@ -96,6 +108,34 @@ _install_file() {
 		_log "Installing $file to $dest"
 		ln -s "$DOTCTL_DOTFILES_DIR/$file" "$dest"
 	fi
+}
+
+_uninstall_files() {
+	prefix=$1
+	while read -r file; do
+		_uninstall_file "$file" "$prefix"
+	done
+}
+
+_uninstall_file() {
+	file=$1
+	prefix=$2
+
+	dest=$file
+	[ -n "$prefix" ] && dest=$(echo "$file" | cut -d '/' -f 2-)
+	file_dir=$(dirname "$file")
+
+	dest="$DOTCTL_DOTFILES_DESTDIR/.$dest"
+	[ -L "$dest" ] || return 0
+
+	_log "Uninstalling $dest"
+	rm "$dest"
+
+	[ "$file_dir" = "." ] && return 0
+
+	dir=$(dirname "$dest")
+	_log "Removing empty directories $dir"
+	rmdir --ignore-fail-on-non-empty -p "$dir"
 }
 
 _exclude_files() {
@@ -144,6 +184,30 @@ _up() {
 	hook_file="$DOTCTL_DOTFILES_DIR/hooks/post-up"
 	if [ "$DOTCTL_NO_HOOK" = "0" ]; then
 		_log "Running post-up hook"
+		[ -x "$hook_file" ] && "$hook_file"
+	fi
+}
+
+_down() {
+	tags="$*"
+
+	_log "Uninstalling symlink directories"
+	_tracked_files | _symlink_dirs | _uninstall_symlink_dirs
+
+	_log "Uninstalling tracked files"
+	_tracked_files | _exclude_tags | _exclude_files | _uninstall_files
+
+	for tag in $tags; do
+		tag_dir="tag-$tag"
+		_log "Uninstalling symlink directories with tag $tag"
+		_tracked_files | _symlink_dirs "$tag_dir" | _uninstall_symlink_dirs "$tag_dir"
+		_log "Uninstalling tracked files with tag $tag"
+		_tracked_files | _only_tag "$tag_dir" | _exclude_files | _uninstall_files "$tag_dir"
+	done
+
+	hook_file="$DOTCTL_DOTFILES_DIR/hooks/post-down"
+	if [ "$DOTCTL_NO_HOOK" = "0" ]; then
+		_log "Running post-down hook"
 		[ -x "$hook_file" ] && "$hook_file"
 	fi
 }
@@ -201,6 +265,11 @@ while true; do
 		up)
 			shift
 			_up "$@"
+			break
+			;;
+		down)
+			shift
+			_down "$@"
 			break
 			;;
 		*)
